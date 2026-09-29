@@ -45,6 +45,11 @@ import {
 import type { Project } from '../src/types';
 import { uid } from '../src/lib/id';
 import { partUnderSeconds, planRehearsalBudget, type BudgetPart } from '../src/lib/budget';
+import {
+  applyBeatMapChange,
+  formatAnchorConflicts,
+  setIntervalAnchored,
+} from '../src/lib/anchor';
 
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -1293,6 +1298,169 @@ check('absence clamp Infinity', clampAbsence(0, Infinity, 10), null);
   const r = planRehearsalBudget(22, parts, u.map((x) => x.seconds));
   // 权重 4:5:2:0，22 分钟：8/10/4/0（比例恰为整数）
   check('budget from live coverage', r.ok ? r.allocations.map((a) => a.minutes) : null, [8, 10, 4, 0]);
+}
+
+// ---------- 换气段拍位锚定：节拍图修改重算、越界 / 重叠整体拒绝、状态持久化 ----------
+
+/** 给指定歌手的换气段打上锚定标记。 */
+function anchorBreaths(p: Project, singerId: string, ids: string[]): Project {
+  let q = p;
+  for (const id of ids) q = setIntervalAnchored(q, singerId, id, true);
+  return q;
+}
+
+// 74. 节拍图变化：锚定段两端按原拍位重新换算为秒，未锚定段保持原秒位置
+{
+  const p = relayProject([[[2, 4]]], { minSingers: 1, bpm: 120, duration: 30 }); // 每拍 0.5s
+  const ivId = p.singers[0].breaths[0].id;
+  const locked = anchorBreaths(p, p.singers[0].id, [ivId]);
+  check('anchor flag set', locked.singers[0].breaths[0].anchored, true);
+
+  // 起始 BPM 120 → 60：[2,4)s 对应拍 [4,8)，60 BPM 下拍 4→4s、拍 8→8s
+  const r = applyBeatMapChange(locked, { startBpm: 60 });
+  check('anchor edit ok', r.ok, true);
+  if (r.ok) {
+    near('locked start rescaled', r.project.singers[0].breaths[0].start, 4);
+    near('locked end rescaled', r.project.singers[0].breaths[0].end, 8);
+    near('locked length in beats', timeToBeat(8, r.project.beatMap) - timeToBeat(4, r.project.beatMap), 4);
+    check('anchor stays anchored after recompute', r.project.singers[0].breaths[0].anchored, true);
+    check('anchor moved flagged', r.movedAnchors, true);
+    check('new beatmap applied', r.project.beatMap.startBpm, 60);
+  }
+
+  // 未锚定段：同样的节拍图修改后秒位置完全不变
+  const r2 = applyBeatMapChange(p, { startBpm: 60 });
+  check('unlocked edit ok', r2.ok, true);
+  if (r2.ok) {
+    check('unlocked seconds kept', [r2.project.singers[0].breaths[0].start, r2.project.singers[0].breaths[0].end], [2, 4]);
+    check('unlocked moved flagged false', r2.movedAnchors, false);
+  }
+}
+
+// 75. 锚定段跨变速点重算：拍域不变、各拍长按新分段速度换算
+{
+  // 旧图：120 BPM、第 3 小节首拍（拍8, t=4）变 60；区间 [3,6)s = 拍 6→10
+  const p = relayProject([[[3, 6]]], {
+    minSingers: 1,
+    duration: 40,
+    changes: [{ measure: 3, bpm: 60 }],
+  });
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  // 新图：把变速点速度 60 → 240（拍8 之后每拍 0.25s）：拍6→3s、拍10→4.5s
+  const nextChanges = locked.beatMap.changes.map((c) => ({ ...c, bpm: 240 }));
+  const r = applyBeatMapChange(locked, { changes: nextChanges });
+  check('anchor across change ok', r.ok, true);
+  if (r.ok) {
+    near('cross-change start', r.project.singers[0].breaths[0].start, 3);
+    near('cross-change end', r.project.singers[0].breaths[0].end, 4.5);
+    // 起止仍落在原拍位 6 与 10
+    near('cross-change start beat', timeToBeat(r.project.singers[0].breaths[0].start, r.project.beatMap), 6);
+    near('cross-change end beat', timeToBeat(r.project.singers[0].breaths[0].end, r.project.beatMap), 10);
+  }
+}
+
+// 76. 重算后锚定段越出全曲 → 拒绝：保留原节拍图与全部换气段，指出冲突歌手与区间
+{
+  const p = relayProject([[[2, 4]]], { minSingers: 1, bpm: 120, duration: 6 }); // 全曲 6s
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  const r = applyBeatMapChange(locked, { startBpm: 60 }); // [2,4)s 拍[4,8) → 新秒 [4,8)，终点 8 > 6
+  check('bounds rejected', r.ok, false);
+  if (!r.ok) {
+    check('bounds conflict kind', r.conflicts[0].kind, 'bounds');
+    check('bounds conflict singer', r.conflicts[0].singerName, '歌手1');
+    check('bounds conflict range', [r.conflicts[0].start, r.conflicts[0].end], [4, 6]);
+    check('bounds message names singer', formatAnchorConflicts(r.conflicts).includes('歌手1'), true);
+  }
+  // 拒绝不产生新工程（调用方保留原对象）
+  check('bounds keeps old bpm', locked.beatMap.startBpm, 120);
+  check('bounds keeps old seconds', [locked.singers[0].breaths[0].start, locked.singers[0].breaths[0].end], [2, 4]);
+}
+
+// 77. 重算后与同歌手其它换气段重叠 → 拒绝；不同歌手互不影响
+{
+  // 歌手1：锁定段 [2,3)s（120BPM 下拍 4→6），未锁定段 [4,6)s。
+  // BPM 120→60 后锁定段变为 [4,6)s，与未锁定段 [4,6) 完全重叠 → 拒绝。
+  const p = relayProject([[[2, 3], [4, 6]], [[2, 3]]], { minSingers: 1, bpm: 120, duration: 30 });
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  const r = applyBeatMapChange(locked, { startBpm: 60 });
+  check('overlap rejected', r.ok, false);
+  if (!r.ok) {
+    check('overlap conflict kind', r.conflicts[0].kind, 'overlap');
+    check('overlap conflict singer', r.conflicts[0].singerName, '歌手1');
+    check('overlap conflict range', [r.conflicts[0].start, r.conflicts[0].end], [4, 6]);
+    check('overlap names other singer false', formatAnchorConflicts(r.conflicts).includes('歌手2'), false);
+  }
+  // 半开相邻允许：锁定 [1,2)s=拍2→4（120 BPM）；同歌手另有未锁定 [4,5)s。
+  // 120→60：拍2→2s、拍4→4s，锁定段变 [2,4)，与 [4,5) 半开相邻 → 接受。
+  const q = relayProject([[[1, 2], [4, 5]]], { minSingers: 1, bpm: 120, duration: 30 });
+  const ql = anchorBreaths(q, q.singers[0].id, [q.singers[0].breaths[0].id]);
+  const rq = applyBeatMapChange(ql, { startBpm: 60 });
+  check('half-open adjacency accepted', rq.ok, true);
+  if (rq.ok) {
+    check('half-open locked moved', [rq.project.singers[0].breaths[0].start, rq.project.singers[0].breaths[0].end], [2, 4]);
+    check('half-open unlocked kept', [rq.project.singers[0].breaths[1].start, rq.project.singers[0].breaths[1].end], [4, 5]);
+  }
+}
+
+// 78. 冲突只针对同一歌手：两位歌手的换气段重算后落在同一区间不构成冲突
+{
+  const p = relayProject([[[2, 3]], [[2, 3]]], { minSingers: 1, bpm: 120, duration: 30 });
+  const locked = anchorBreaths(
+    anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]),
+    p.singers[1].id,
+    [p.singers[1].breaths[0].id],
+  );
+  const r = applyBeatMapChange(locked, { startBpm: 60 }); // 两人都变 [4,6)，跨歌手允许
+  check('cross-singer overlap allowed', r.ok, true);
+}
+
+// 79. 锚定状态随工程导入 / 导出与本地保存保留；旧工程缺省未锁定
+{
+  const p = relayProject([[[2, 3]]], { minSingers: 1, bpm: 120 });
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  const round = sanitizeProject(JSON.parse(JSON.stringify(locked)))!;
+  check('anchor preserved through export/import', round.singers[0].breaths[0].anchored, true);
+
+  const raw = JSON.parse(JSON.stringify(p)) as { singers: { breaths: Record<string, unknown>[] }[] };
+  delete (raw.singers[0].breaths[0] as { anchored?: boolean }).anchored;
+  check('anchor old project default unlocked', sanitizeProject(raw)?.singers[0].breaths[0].anchored === true, false);
+  // 非布尔真值不进入状态
+  const bad = JSON.parse(JSON.stringify(locked)) as {
+    singers: { breaths: { anchored: unknown }[] }[];
+  };
+  bad.singers[0].breaths[0].anchored = 1;
+  check('anchor non-boolean sanitized', sanitizeProject(bad)?.singers[0].breaths[0].anchored === true, false);
+
+  const store = new Map<string, string>();
+  (globalThis as Record<string, unknown>).localStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+  saveProject(locked);
+  check('anchor persists in localStorage', loadProject()!.singers[0].breaths[0].anchored, true);
+}
+
+// 80. 锚定状态随快照冻结 / 恢复保留；旧快照缺省未锁定
+{
+  const p = relayProject([[[2, 3]]], { minSingers: 1, bpm: 120 });
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  const snap = createSnapshot(locked);
+  check('snapshot freezes anchor', snap.singers[0].breaths[0].anchored, true);
+  const restored = restoreProjectSnapshot(p, snap);
+  check('restore brings anchor back', restored.singers[0].breaths[0].anchored, true);
+  const raw = JSON.parse(JSON.stringify(snap)) as { singers: { breaths: { anchored?: boolean }[] }[] };
+  delete raw.singers[0].breaths[0].anchored;
+  check('old snapshot anchor default unlocked', sanitizeSnapshot(raw)?.singers[0].breaths[0].anchored === true, false);
+}
+
+// 81. 节拍图无实际改动时 movedAnchors 为 false（锚定段重算后位置不变，预览无需清除）
+{
+  const p = relayProject([[[2, 3]]], { minSingers: 1, bpm: 120 });
+  const locked = anchorBreaths(p, p.singers[0].id, [p.singers[0].breaths[0].id]);
+  const r = applyBeatMapChange(locked, { startBpm: 120 });
+  check('no-op edit moved false', r.ok ? r.movedAnchors : null, false);
+  if (r.ok) check('no-op seconds stable', [r.project.singers[0].breaths[0].start, r.project.singers[0].breaths[0].end], [2, 3]);
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`);

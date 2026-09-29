@@ -9,7 +9,6 @@ import {
   removeTempoChange,
   setTempoChange,
   timeToLocation,
-  updateBeatMap,
 } from '../lib/tempo';
 import SnapshotPanel from './SnapshotPanel';
 
@@ -20,8 +19,11 @@ interface Props {
   fatigue: Map<string, FatigueSegment[]>;
   /** 以不可变方式修改工程（会自动使寻优结果失效） */
   mutate: (fn: (p: Project) => Project) => void;
-  /** 修改节拍图（不影响换气段的秒位置，也不使寻优结果失效） */
-  mutateBeatMap: (fn: (b: Project['beatMap']) => Project['beatMap']) => void;
+  /**
+   * 修改节拍图（原子提交）：锚定换气段按原拍位重算秒位置，未锚定段保持原秒位置；
+   * 重算导致越界 / 重叠时整体拒绝并提示冲突歌手与区间，不应用部分改动。
+   */
+  mutateBeatMap: (patch: Partial<Project['beatMap']>) => void;
   snapshots: RehearsalSnapshot[];
   onCreateSnapshot: (name: string) => void;
   onRestoreSnapshot: (snapshot: RehearsalSnapshot) => void;
@@ -50,25 +52,25 @@ export default function Sidebar({
   const setBeatsPerBar = (raw: string) => {
     const n = Math.round(Number(raw));
     if (!Number.isFinite(n) || n < 1 || n > 16) return;
-    mutateBeatMap((b) => updateBeatMap(b, { beatsPerBar: n }));
+    mutateBeatMap({ beatsPerBar: n });
   };
 
   const setBeatUnit = (raw: string) => {
     const n = Math.round(Number(raw));
     if (!Number.isFinite(n) || n < 1 || n > 16) return;
-    mutateBeatMap((b) => updateBeatMap(b, { beatUnit: n }));
+    mutateBeatMap({ beatUnit: n });
   };
 
   const setStartBpm = (raw: string) => {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 1 || n > 999) return;
-    mutateBeatMap((b) => updateBeatMap(b, { startBpm: n }));
+    mutateBeatMap({ startBpm: n });
   };
 
   const addChange = () => {
     const measure = nextFreeMeasure(beatMap);
     const next = setTempoChange(beatMap, measure, beatMap.startBpm);
-    if (next) mutateBeatMap(() => next);
+    if (next) mutateBeatMap({ changes: next.changes });
   };
 
   const editChange = (id: string, patch: { measure?: number; bpm?: number }) => {
@@ -83,7 +85,7 @@ export default function Sidebar({
       alert('该小节首拍已有变速点');
       return;
     }
-    mutateBeatMap(() => next);
+    mutateBeatMap({ changes: next.changes });
   };
 
   // 全曲时长落在第几小节第几拍（只显示，不改变秒位置）
@@ -246,7 +248,7 @@ export default function Sidebar({
                 onChange={(e) => editChange(c.id, { bpm: Number(e.target.value) })}
               />
               <span className="muted">BPM</span>
-              <button className="icon-btn" title="删除变速点" onClick={() => mutateBeatMap((b) => removeTempoChange(b, c.id))}>
+              <button className="icon-btn" title="删除变速点" onClick={() => mutateBeatMap({ changes: removeTempoChange(beatMap, c.id).changes })}>
                 ✕
               </button>
             </div>
@@ -256,7 +258,7 @@ export default function Sidebar({
           ＋ 添加变速点
         </button>
         <p className="beatmap-end muted">
-          当前时长 {project.duration}s ≈ 第 {endBeatText} 拍（编辑节拍图只改拍位显示，不移动换气段）
+          当前时长 {project.duration}s ≈ 第 {endBeatText} 拍（编辑节拍图不移动未锁定换气段；🔒 锁定段按原拍位重算，越界或重叠时本次修改整体拒绝）
         </p>
       </section>
 
@@ -389,7 +391,7 @@ export default function Sidebar({
           <li>双击歌手轨道空白处：新增换气段</li>
           <li>拖动换气段：整体移动；拖动两端：调整时长</li>
           <li>时间轴可在「秒 / 拍」标尺间切换，勾选「按拍吸附」后新增与拖拽自动落到整拍</li>
-          <li>点击换气段选中后，可在右下方面板一键寻优</li>
+          <li>点击换气段选中后，可在右下方面板一键寻优或🔒锁定到当前拍位（节拍图改动后锁定段按拍重算，越界/重叠会拒绝该次修改）</li>
           <li>在下方「声部接力排程」选择声部、起止拍位与每人换气拍数，可回溯搜索整组接力换气，幽灵块预览后再整组写入</li>
           <li>在下方「临时缺席预演」为多位歌手临时添加按秒计的缺席区间：只在本页重算覆盖并标出新增未达标，不改工程与换气段，退出即恢复</li>
           <li>排练前在「排练快照」保存当前规划；展开快照可查看按时间排序的区间增删 / 移动 / 时长差异，二次确认后恢复（节拍图不受影响）</li>

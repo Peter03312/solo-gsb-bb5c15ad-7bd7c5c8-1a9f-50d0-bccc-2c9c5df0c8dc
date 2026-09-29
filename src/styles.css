@@ -483,6 +483,41 @@ input[type='number'] {
   opacity: 0.3;
 }
 
+/* 锚定（锁定拍位）换气段：虚线描边 + 角标 */
+.breath-block.anchored {
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
+}
+
+.breath-block.anchored .anchor-mark {
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+  flex: none;
+  margin: 0 1px;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6));
+}
+
+.anchor-btn {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.12);
+  color: inherit;
+  cursor: pointer;
+}
+
+.anchor-btn:hover {
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.anchor-btn.locked {
+  border-color: rgba(250, 204, 21, 0.7);
+  background: rgba(250, 204, 21, 0.18);
+}
+
 .breath-label {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.9);

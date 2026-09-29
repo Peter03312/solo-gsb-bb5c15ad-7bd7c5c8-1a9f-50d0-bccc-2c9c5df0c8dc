@@ -197,13 +197,14 @@ export function sanitizeSnapshot(raw: unknown): RehearsalSnapshot | null {
       const partId = str(s.partId, '');
       if (!partIds.has(partId)) return null;
       const breaths = (Array.isArray(s.breaths) ? s.breaths : [])
-        .map((rb) => {
+        .map((rb): BreathInterval | null => {
           const b = rb as Record<string, unknown>;
           if (!b || typeof b !== 'object') return null;
           const start = num(b.start, NaN);
           const end = num(b.end, NaN);
           if (!Number.isFinite(start) || !Number.isFinite(end) || end - start <= EPS) return null;
-          return { id: str(b.id, uid()), start, end };
+          // 旧快照缺少 anchored 字段时缺省为未锚定（false）；锚定状态随快照冻结 / 恢复保留
+          return { id: str(b.id, uid()), start, end, anchored: b.anchored === true };
         })
         .filter((x): x is BreathInterval => x !== null);
       // 旧快照缺少疲劳设置时补 0/0（停用）；负数 / 非有限值归 0

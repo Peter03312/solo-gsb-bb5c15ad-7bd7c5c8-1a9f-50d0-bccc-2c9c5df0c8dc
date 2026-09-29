@@ -15,6 +15,8 @@ interface Props {
   onApply: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  /** 锁定 / 解锁选中换气段的当前起止拍位 */
+  onToggleAnchor: (singerId: string, intervalId: string, anchored: boolean) => void;
 }
 
 export default function OptimizerPanel(props: Props) {
@@ -46,6 +48,15 @@ export default function OptimizerPanel(props: Props) {
                 · 拍位 {fmtTimeAsBeat(interval.start, project.beatMap)} –{' '}
                 {fmtTimeAsBeat(interval.end, project.beatMap)}
               </span>
+              <button
+                className={interval.anchored ? 'anchor-btn locked' : 'anchor-btn'}
+                title="锁定在当前起止拍位：节拍图变化后按原拍位重新换算为秒；手动移动或缩放该段会自动解锁。"
+                onClick={() =>
+                  props.onToggleAnchor(singer.id, interval.id, !interval.anchored)
+                }
+              >
+                {interval.anchored ? '🔒 已锁定拍位（点击解锁）' : '🔓 锁定到当前拍位'}
+              </button>
             </div>
             <div className="range-row">
               <span>搜索范围 ±</span>

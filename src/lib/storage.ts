@@ -49,7 +49,8 @@ export function sanitizeProject(raw: unknown): Project | null {
           const start = Math.min(Math.max(0, num(b.start, 0)), duration);
           const end = Math.min(Math.max(0, num(b.end, 0)), duration);
           if (end - start <= 0) return null;
-          return { id: str(b.id, uid()), start, end };
+          // 旧工程缺少 anchored 字段时缺省为未锚定（false）；仅接受严格布尔 true
+          return { id: str(b.id, uid()), start, end, anchored: b.anchored === true };
         })
         .filter((x): x is NonNullable<typeof x> => x !== null);
       // 旧工程缺少疲劳设置时补 0/0（停用）；负数 / 非有限值归 0

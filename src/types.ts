@@ -5,6 +5,12 @@ export interface BreathInterval {
   start: number;
   /** 结束秒（不含） */
   end: number;
+  /**
+   * 是否锚定（锁定）在当前起止拍位上：节拍图变化时两端按原拍位重新换算为秒，
+   * 未锚定段保持原秒位置；手动移动 / 缩放该段即解除锚定。
+   * 旧工程缺省视为未锚定（false）。
+   */
+  anchored?: boolean;
 }
 
 /**

@@ -63,11 +63,11 @@ export default function BreathBlock(props: Props) {
 
   const dur = interval.end - interval.start;
   const title = props.beatTitle
-    ? `${props.beatTitle}\n换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）\n拖动移动，拖动两端调整时长`
-    : `换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）\n拖动移动，拖动两端调整时长`;
+    ? `${props.beatTitle}\n换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）${interval.anchored ? '\n🔒 已锁定拍位：节拍图变化后按原拍重算；拖动 / 缩放即解锁' : ''}\n拖动移动，拖动两端调整时长`
+    : `换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）${interval.anchored ? '\n🔒 已锁定拍位：节拍图变化后按原拍重算；拖动 / 缩放即解锁' : ''}\n拖动移动，拖动两端调整时长`;
   return (
     <div
-      className={`breath-block${props.selected ? ' selected' : ''}${props.dimmed ? ' dimmed' : ''}`}
+      className={`breath-block${props.selected ? ' selected' : ''}${props.dimmed ? ' dimmed' : ''}${interval.anchored ? ' anchored' : ''}`}
       style={{
         left: interval.start * pxPerSec,
         width: Math.max(4, dur * pxPerSec),
@@ -81,6 +81,7 @@ export default function BreathBlock(props: Props) {
       onClick={(e) => e.stopPropagation()}
     >
       <div className="handle left" onPointerDown={begin('left')} />
+      {interval.anchored && <span className="anchor-mark">🔒</span>}
       <span className="breath-label">{props.beatLabel ?? fmtSec(dur)}</span>
       <div className="handle right" onPointerDown={begin('right')} />
     </div>

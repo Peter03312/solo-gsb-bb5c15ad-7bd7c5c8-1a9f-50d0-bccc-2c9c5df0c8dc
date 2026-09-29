@@ -8,7 +8,7 @@ import {
   restoreProjectSnapshot,
   saveSnapshots,
 } from './lib/snapshot';
-import { normalizeBeatMap } from './lib/tempo';
+import { applyBeatMapChange, formatAnchorConflicts, setIntervalAnchored } from './lib/anchor';
 import { partUnder, totalSeconds, type Segment } from './lib/coverage';
 import { projectFatigue } from './lib/fatigue';
 import { applyMove, findBestMove, type OptimizeResult } from './lib/optimize';
@@ -82,18 +82,25 @@ export default function App() {
   );
 
   /**
-   * 仅修改节拍图：换气段的实际秒位置保持不变（仅重新显示对应拍位），
-   * 因此不影响寻优结果（寻优基于秒），无需清空寻优预览；
-   * 但接力排程的候选是在旧拍域上枚举的、缺席区间是按秒轴标注的，
-   * 节拍图一变展示即错位，需退出这两类预演。
+   * 节拍图修改入口（原子提交）：锚定换气段按原拍位重算秒位置，未锚定段秒位置不变；
+   * 接力候选在旧拍域枚举、缺席按秒轴标注，节拍图一变展示即错位，需先退出这两类预演。
+   * 重算使任一段越界或与同歌手其它段重叠时整体拒绝（返回冲突信息），
+   * 不应用任何部分改动；成功且锚定段实际位移时，清除基于旧秒位置的寻优预览。
    */
   const mutateBeatMap = useCallback(
-    (fn: (b: Project['beatMap']) => Project['beatMap']) => {
+    (patch: Parameters<typeof applyBeatMapChange>[1]) => {
       clearRelay();
       clearAbsences();
-      setProject((p) => ({ ...p, beatMap: normalizeBeatMap(fn(p.beatMap)) }));
+      const r = applyBeatMapChange(project, patch);
+      if (!r.ok) {
+        alert(formatAnchorConflicts(r.conflicts));
+        return r;
+      }
+      if (r.movedAnchors) clearOptimization();
+      setProject(r.project);
+      return r;
     },
-    [clearRelay, clearAbsences],
+    [project, clearOptimization, clearRelay, clearAbsences],
   );
 
   // 选中的换气段被删除后，清空选择
@@ -215,6 +222,9 @@ export default function App() {
   }, [relay]);
 
   // ---------- 换气段操作 ----------
+  /**
+   * 拖拽 / 缩放换气段落位：手动移动或缩放即解除锚定（锚定只在节拍图变化时按拍重算）。
+   */
   const updateInterval = useCallback(
     (singerId: string, intervalId: string, start: number, end: number) => {
       mutate((p) => ({
@@ -222,9 +232,22 @@ export default function App() {
         singers: p.singers.map((s) =>
           s.id !== singerId
             ? s
-            : { ...s, breaths: s.breaths.map((b) => (b.id !== intervalId ? b : { ...b, start, end })) },
+            : {
+                ...s,
+                breaths: s.breaths.map((b) =>
+                  b.id !== intervalId ? b : { ...b, start, end, anchored: false },
+                ),
+              },
         ),
       }));
+    },
+    [mutate],
+  );
+
+  /** 指挥把选中换气段锁定 / 解锁在当前起止拍位（锚定状态随工程持久化）。 */
+  const toggleAnchor = useCallback(
+    (singerId: string, intervalId: string, anchored: boolean) => {
+      mutate((p) => setIntervalAnchored(p, singerId, intervalId, anchored));
     },
     [mutate],
   );
@@ -279,7 +302,13 @@ export default function App() {
 
   const applyPreview = () => {
     if (!result || previewOffset === null) return;
-    setProject((p) => applyMove(p, result.singerId, result.intervalId, previewOffset));
+    const moved = applyMove(project, result.singerId, result.intervalId, previewOffset);
+    // 寻优应用属于手动移动：实际发生位移即解除锚定；位移为 0 保持原锚定状态
+    setProject(
+      previewOffset === 0
+        ? moved
+        : setIntervalAnchored(moved, result.singerId, result.intervalId, false),
+    );
     clearOptimization();
     clearAbsences();
   };
@@ -540,6 +569,7 @@ export default function App() {
             onApply={applyPreview}
             onCancel={clearOptimization}
             onDelete={() => selection && deleteInterval(selection.singerId, selection.intervalId)}
+            onToggleAnchor={toggleAnchor}
           />
 
           <BudgetPanel project={project} />
