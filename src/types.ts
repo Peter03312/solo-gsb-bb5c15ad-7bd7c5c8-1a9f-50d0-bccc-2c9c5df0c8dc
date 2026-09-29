@@ -1,3 +1,11 @@
+/** 拍位锚定：换气段锁定时记录的起止绝对拍位（0 起算浮点拍）。 */
+export interface BreathAnchor {
+  /** 起点绝对拍（含） */
+  startBeat: number;
+  /** 终点绝对拍（不含） */
+  endBeat: number;
+}
+
 /** 换气区间：半开区间 [start, end)，单位秒。歌手在该区间内不发声。 */
 export interface BreathInterval {
   id: string;
@@ -5,6 +13,11 @@ export interface BreathInterval {
   start: number;
   /** 结束秒（不含） */
   end: number;
+  /**
+   * 拍位锚定（缺省 = 未锁定）：锁定时记录的起止拍位。
+   * 节拍图变化时锚定段按该拍位重新换算为秒；手动移动 / 缩放即解除锚定。
+   */
+  anchor?: BreathAnchor;
 }
 
 /**

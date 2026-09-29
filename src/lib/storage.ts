@@ -1,7 +1,8 @@
-import type { BeatMap, Project } from '../types';
+import type { BeatMap, BreathInterval, Project } from '../types';
 import { uid } from './id';
 import { normalizeBeatMap } from './tempo';
 import { sanitizeFatigue } from './fatigue';
+import { sanitizeAnchor } from './anchor';
 
 export { uid };
 
@@ -49,7 +50,11 @@ export function sanitizeProject(raw: unknown): Project | null {
           const start = Math.min(Math.max(0, num(b.start, 0)), duration);
           const end = Math.min(Math.max(0, num(b.end, 0)), duration);
           if (end - start <= 0) return null;
-          return { id: str(b.id, uid()), start, end };
+          // 旧工程缺少锚定字段时视为未锁定；非法锚定值丢弃
+          const anchor = sanitizeAnchor(b.anchor);
+          const out: BreathInterval = { id: str(b.id, uid()), start, end };
+          if (anchor) out.anchor = anchor;
+          return out;
         })
         .filter((x): x is NonNullable<typeof x> => x !== null);
       // 旧工程缺少疲劳设置时补 0/0（停用）；负数 / 非有限值归 0

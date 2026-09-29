@@ -4,7 +4,7 @@ import { totalSeconds, type Segment, type UnderSegment } from '../lib/coverage';
 import { subtractUnder } from '../lib/absence';
 import type { FatigueSegment } from '../lib/fatigue';
 import { placeNewInterval, placeNewIntervalOnBeat } from '../lib/constraints';
-import { beatTicks, fmtTimeAsBeat, snapTimeToBeat, timeToLocation } from '../lib/tempo';
+import { beatTicks, beatToLocation, fmtLocation, fmtTimeAsBeat, snapTimeToBeat, timeToLocation } from '../lib/tempo';
 import { fmtSec, fmtTick } from '../lib/format';
 import BreathBlock from './BreathBlock';
 
@@ -316,6 +316,11 @@ export default function Timeline(props: Props) {
                       beatTitle={
                         beatMode
                           ? `拍位 ${fmtTimeAsBeat(b.start, beatMap)} – ${fmtTimeAsBeat(b.end, beatMap)}`
+                          : null
+                      }
+                      anchorTitle={
+                        b.anchor
+                          ? `📌 已锚定拍位 ${fmtLocation(beatToLocation(b.anchor.startBeat, beatMap))} – ${fmtLocation(beatToLocation(b.anchor.endBeat, beatMap))}：节拍图变化时按该拍位重新换算为秒；手动拖动 / 缩放即解除锚定`
                           : null
                       }
                       onSelect={() => props.onSelect({ singerId: singer.id, intervalId: b.id })}

@@ -9,6 +9,12 @@ import {
   saveSnapshots,
 } from './lib/snapshot';
 import { normalizeBeatMap } from './lib/tempo';
+import {
+  clearAnchor,
+  describeAnchorConflicts,
+  remapAnchoredBreaths,
+  toggleBreathAnchor,
+} from './lib/anchor';
 import { partUnder, totalSeconds, type Segment } from './lib/coverage';
 import { projectFatigue } from './lib/fatigue';
 import { applyMove, findBestMove, type OptimizeResult } from './lib/optimize';
@@ -82,18 +88,28 @@ export default function App() {
   );
 
   /**
-   * 仅修改节拍图：换气段的实际秒位置保持不变（仅重新显示对应拍位），
-   * 因此不影响寻优结果（寻优基于秒），无需清空寻优预览；
-   * 但接力排程的候选是在旧拍域上枚举的、缺席区间是按秒轴标注的，
-   * 节拍图一变展示即错位，需退出这两类预演。
+   * 仅修改节拍图：未锚定的换气段保持原秒位置（仅重新显示对应拍位），
+   * 锚定段按锁定的起止拍位随新节拍图重新换算为秒。
+   * 若重算使任一锚定段越出全曲或与同歌手其它换气段重叠，则整体拒绝：
+   * 保留原节拍图与全部换气段，并指出冲突歌手与区间（不应用部分改动）。
+   * 成功后覆盖与疲劳警示随新位置自动重算；锚定段实际位移时，
+   * 基于旧位置的寻优 / 接力 / 缺席预览全部失效；未位移时与原来一致——
+   * 接力候选在旧拍域枚举、缺席按秒轴标注，仍需退出这两类预演。
    */
   const mutateBeatMap = useCallback(
     (fn: (b: Project['beatMap']) => Project['beatMap']) => {
+      const beatMap = normalizeBeatMap(fn(project.beatMap));
+      const remap = remapAnchoredBreaths(project, beatMap);
+      if (!remap.ok) {
+        alert(describeAnchorConflicts(remap.conflicts, project.duration));
+        return;
+      }
       clearRelay();
       clearAbsences();
-      setProject((p) => ({ ...p, beatMap: normalizeBeatMap(fn(p.beatMap)) }));
+      if (remap.moved) clearOptimization();
+      setProject({ ...project, beatMap, singers: remap.singers });
     },
-    [clearRelay, clearAbsences],
+    [project, clearOptimization, clearRelay, clearAbsences],
   );
 
   // 选中的换气段被删除后，清空选择
@@ -215,6 +231,7 @@ export default function App() {
   }, [relay]);
 
   // ---------- 换气段操作 ----------
+  /** 手动移动 / 缩放换气段：同时解除其拍位锚定。 */
   const updateInterval = useCallback(
     (singerId: string, intervalId: string, start: number, end: number) => {
       mutate((p) => ({
@@ -222,12 +239,35 @@ export default function App() {
         singers: p.singers.map((s) =>
           s.id !== singerId
             ? s
-            : { ...s, breaths: s.breaths.map((b) => (b.id !== intervalId ? b : { ...b, start, end })) },
+            : {
+                ...s,
+                breaths: s.breaths.map((b) =>
+                  b.id !== intervalId ? b : { ...clearAnchor(b), start, end },
+                ),
+              },
         ),
       }));
     },
     [mutate],
   );
+
+  /**
+   * 锚定 / 解除锚定选中的换气段：只记录或清除其当前起止拍位，
+   * 秒位置不变，因此不影响覆盖 / 疲劳与各预览，无需清空任何预演。
+   */
+  const toggleAnchor = useCallback((singerId: string, intervalId: string) => {
+    setProject((p) => ({
+      ...p,
+      singers: p.singers.map((s) =>
+        s.id !== singerId
+          ? s
+          : {
+              ...s,
+              breaths: s.breaths.map((b) => (b.id !== intervalId ? b : toggleBreathAnchor(b, p.beatMap))),
+            },
+      ),
+    }));
+  }, []);
 
   const addInterval = useCallback(
     (singerId: string, seg: Segment) => {
@@ -540,6 +580,7 @@ export default function App() {
             onApply={applyPreview}
             onCancel={clearOptimization}
             onDelete={() => selection && deleteInterval(selection.singerId, selection.intervalId)}
+            onToggleAnchor={() => selection && toggleAnchor(selection.singerId, selection.intervalId)}
           />
 
           <BudgetPanel project={project} />

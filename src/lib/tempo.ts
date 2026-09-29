@@ -129,12 +129,17 @@ export interface BeatLocation {
   absolute: number;
 }
 
-/** 秒 → 小节/拍位置。 */
-export function timeToLocation(time: number, beatMap: BeatMap): BeatLocation {
-  const absolute = Math.max(0, timeToBeat(time, beatMap));
+/** 绝对拍（0 起算浮点拍）→ 小节/拍位置。 */
+export function beatToLocation(beat: number, beatMap: BeatMap): BeatLocation {
+  const absolute = Math.max(0, beat);
   const bpb = beatMap.beatsPerBar;
   const measure = Math.floor(absolute / bpb) + 1;
   return { measure, beatInBar: absolute - (measure - 1) * bpb + 1, absolute };
+}
+
+/** 秒 → 小节/拍位置。 */
+export function timeToLocation(time: number, beatMap: BeatMap): BeatLocation {
+  return beatToLocation(timeToBeat(time, beatMap), beatMap);
 }
 
 /** 把任意秒吸附到最近的整拍（跨变速点时先换算到拍域再取整、再换回秒）。 */

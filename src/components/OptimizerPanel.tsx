@@ -1,7 +1,7 @@
 import type { Project, Selection } from '../types';
 import type { OptimizeResult } from '../lib/optimize';
 import { fmtOffset, fmtSec } from '../lib/format';
-import { fmtTimeAsBeat } from '../lib/tempo';
+import { beatToLocation, fmtLocation, fmtTimeAsBeat } from '../lib/tempo';
 
 interface Props {
   project: Project;
@@ -15,6 +15,8 @@ interface Props {
   onApply: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  /** 锚定 / 解除锚定选中的换气段（锁定当前起止拍位） */
+  onToggleAnchor: () => void;
 }
 
 export default function OptimizerPanel(props: Props) {
@@ -46,6 +48,16 @@ export default function OptimizerPanel(props: Props) {
                 · 拍位 {fmtTimeAsBeat(interval.start, project.beatMap)} –{' '}
                 {fmtTimeAsBeat(interval.end, project.beatMap)}
               </span>
+              {interval.anchor && (
+                <span
+                  className="anchor-flag"
+                  title="该换气段已锚定拍位：节拍图变化时按此拍位重新换算为秒；手动拖动 / 缩放即解除锚定"
+                >
+                  {' '}
+                  · 📌 已锚定 {fmtLocation(beatToLocation(interval.anchor.startBeat, project.beatMap))} –{' '}
+                  {fmtLocation(beatToLocation(interval.anchor.endBeat, project.beatMap))}
+                </span>
+              )}
             </div>
             <div className="range-row">
               <span>搜索范围 ±</span>
@@ -62,6 +74,13 @@ export default function OptimizerPanel(props: Props) {
               <span>秒（整数位移）</span>
               <button className="primary" onClick={props.onRun}>
                 穷举寻优
+              </button>
+              <button
+                className={interval.anchor ? 'anchor-btn active' : 'anchor-btn'}
+                title="把该换气段锁定在当前起止拍位：节拍图变化时按拍位重新换算为秒（若越出全曲或与同歌手其它换气段重叠，本次节拍图修改将被整体拒绝）；手动拖动 / 缩放即解除锚定"
+                onClick={props.onToggleAnchor}
+              >
+                {interval.anchor ? '📌 解除拍位锚定' : '📌 锚定当前拍位'}
               </button>
               <button className="danger" onClick={props.onDelete}>
                 删除该换气段

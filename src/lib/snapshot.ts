@@ -1,6 +1,7 @@
 import type { BreathInterval, Project, RehearsalSnapshot, Singer, VoicePart } from '../types';
 import { uid } from './id';
 import { sanitizeFatigue } from './fatigue';
+import { sanitizeAnchor } from './anchor';
 
 const EPS = 1e-6;
 const SNAPSHOTS_KEY = 'breath-relay:snapshots:v1';
@@ -203,7 +204,11 @@ export function sanitizeSnapshot(raw: unknown): RehearsalSnapshot | null {
           const start = num(b.start, NaN);
           const end = num(b.end, NaN);
           if (!Number.isFinite(start) || !Number.isFinite(end) || end - start <= EPS) return null;
-          return { id: str(b.id, uid()), start, end };
+          // 旧快照缺少锚定字段时视为未锁定；非法锚定值丢弃
+          const anchor = sanitizeAnchor(b.anchor);
+          const out: BreathInterval = { id: str(b.id, uid()), start, end };
+          if (anchor) out.anchor = anchor;
+          return out;
         })
         .filter((x): x is BreathInterval => x !== null);
       // 旧快照缺少疲劳设置时补 0/0（停用）；负数 / 非有限值归 0

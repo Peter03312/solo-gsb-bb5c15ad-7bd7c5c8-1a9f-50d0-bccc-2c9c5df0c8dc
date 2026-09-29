@@ -20,7 +20,10 @@ interface Props {
   fatigue: Map<string, FatigueSegment[]>;
   /** 以不可变方式修改工程（会自动使寻优结果失效） */
   mutate: (fn: (p: Project) => Project) => void;
-  /** 修改节拍图（不影响换气段的秒位置，也不使寻优结果失效） */
+  /**
+   * 修改节拍图：未锚定的换气段保持秒位置；锚定段按拍位重新换算，
+   * 若因此越出全曲或与同歌手换气重叠则整体拒绝（保留原节拍图与全部换气段）
+   */
   mutateBeatMap: (fn: (b: Project['beatMap']) => Project['beatMap']) => void;
   snapshots: RehearsalSnapshot[];
   onCreateSnapshot: (name: string) => void;
@@ -256,7 +259,8 @@ export default function Sidebar({
           ＋ 添加变速点
         </button>
         <p className="beatmap-end muted">
-          当前时长 {project.duration}s ≈ 第 {endBeatText} 拍（编辑节拍图只改拍位显示，不移动换气段）
+          当前时长 {project.duration}s ≈ 第 {endBeatText} 拍（未锚定的换气段保持秒位置不变；📌
+          锚定段随新节拍图按拍位重新换算，越界 / 重叠则整体拒绝本次修改）
         </p>
       </section>
 
@@ -389,7 +393,7 @@ export default function Sidebar({
           <li>双击歌手轨道空白处：新增换气段</li>
           <li>拖动换气段：整体移动；拖动两端：调整时长</li>
           <li>时间轴可在「秒 / 拍」标尺间切换，勾选「按拍吸附」后新增与拖拽自动落到整拍</li>
-          <li>点击换气段选中后，可在右下方面板一键寻优</li>
+          <li>点击换气段选中后，可在右下方面板一键寻优；同一面板可 📌 锚定当前拍位——节拍图变化时锚定段按拍位重新换算秒（越出全曲或与同歌手换气重叠会整体拒绝修改），手动拖动 / 缩放即解除锚定</li>
           <li>在下方「声部接力排程」选择声部、起止拍位与每人换气拍数，可回溯搜索整组接力换气，幽灵块预览后再整组写入</li>
           <li>在下方「临时缺席预演」为多位歌手临时添加按秒计的缺席区间：只在本页重算覆盖并标出新增未达标，不改工程与换气段，退出即恢复</li>
           <li>排练前在「排练快照」保存当前规划；展开快照可查看按时间排序的区间增删 / 移动 / 时长差异，二次确认后恢复（节拍图不受影响）</li>

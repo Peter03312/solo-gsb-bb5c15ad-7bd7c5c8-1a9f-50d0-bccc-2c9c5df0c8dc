@@ -20,6 +20,8 @@ interface Props {
   beatLabel?: string | null;
   /** 节拍标尺下 tooltip 追加的拍位文本 */
   beatTitle?: string | null;
+  /** 锚定段的 tooltip 文本（已锚定的拍位与解除方式）；null = 未锚定 */
+  anchorTitle?: string | null;
   onSelect: () => void;
   onChange: (start: number, end: number) => void;
 }
@@ -62,12 +64,18 @@ export default function BreathBlock(props: Props) {
   };
 
   const dur = interval.end - interval.start;
-  const title = props.beatTitle
-    ? `${props.beatTitle}\n换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）\n拖动移动，拖动两端调整时长`
-    : `换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）\n拖动移动，拖动两端调整时长`;
+  const anchored = interval.anchor !== undefined;
+  const title = [
+    props.beatTitle ?? null,
+    `换气 ${fmtSec(interval.start)} – ${fmtSec(interval.end)}（时长 ${fmtSec(dur)}）`,
+    anchored ? props.anchorTitle : null,
+    '拖动移动，拖动两端调整时长',
+  ]
+    .filter(Boolean)
+    .join('\n');
   return (
     <div
-      className={`breath-block${props.selected ? ' selected' : ''}${props.dimmed ? ' dimmed' : ''}`}
+      className={`breath-block${props.selected ? ' selected' : ''}${props.dimmed ? ' dimmed' : ''}${anchored ? ' anchored' : ''}`}
       style={{
         left: interval.start * pxPerSec,
         width: Math.max(4, dur * pxPerSec),
@@ -81,7 +89,10 @@ export default function BreathBlock(props: Props) {
       onClick={(e) => e.stopPropagation()}
     >
       <div className="handle left" onPointerDown={begin('left')} />
-      <span className="breath-label">{props.beatLabel ?? fmtSec(dur)}</span>
+      <span className="breath-label">
+        {anchored && <em className="anchor-pin">📌</em>}
+        {props.beatLabel ?? fmtSec(dur)}
+      </span>
       <div className="handle right" onPointerDown={begin('right')} />
     </div>
   );
